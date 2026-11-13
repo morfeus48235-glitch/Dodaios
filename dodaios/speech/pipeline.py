@@ -15998,7 +15998,8 @@ class SpeechPipeline:
         # den bereits abgespielten ACK. Rueckkehr zu LISTENING, User kann den
         # eigentlichen Command nachreichen.
         pending_hangup = getattr(self, "_hangup_confirmation", None)
-        if _is_wake_only(text, getattr(self._wake_plan, "phrase", None)) and not (
+        wake_phrase = getattr(getattr(self, "_wake_plan", None), "phrase", None)
+        if _is_wake_only(text, wake_phrase) and not (
             pending_hangup is not None and pending_hangup.pending_turn is not None
         ):
             log.info("🤫 Wake-only-Turn (%r) — skip Brain, weiter zuhören.", text)
