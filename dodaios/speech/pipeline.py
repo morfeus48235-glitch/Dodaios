@@ -1817,6 +1817,15 @@ from dodaios.speech.wake_constants import (  # noqa: E402
 from dodaios.speech.wake_constants import (  # noqa: E402
     is_silence_hallucination as _is_silence_hallucination,
 )
+from dodaios.speech.wake_constants import (  # noqa: E402
+    WAKE_PREFIXES as _WAKE_PREFIXES,
+)
+from dodaios.speech.wake_constants import (  # noqa: E402
+    normalize_phrase_for_match as _normalize_phrase_for_match,
+)
+from dodaios.speech.wake_constants import (  # noqa: E402
+    phrase_core_for_match as _phrase_core_for_match,
+)
 
 # Paraphrase prefixes Gemini/Claude put in front of an answer when unsure.
 # Cut off as post-processing before the TTS call.
@@ -1858,14 +1867,39 @@ _NON_SUBSTANTIVE_RESPONSE_RE = re.compile(
 ACK_PHRASE = ""
 
 
-def _is_wake_only(text: str) -> bool:
-    """True wenn die Utterance nur aus Wake-Word besteht (kein Command).
+def _is_custom_wake_only(text: str, wake_phrase: str | None) -> bool:
+    """True when *text* is nothing but the configured wake phrase.
 
-    Zweite Bedingung: weniger als 3 "meaningful chars" (alles ausser
-    Whitespace/Punctuation). Verhindert dass auch sehr kurze Noise-
-    Transkripte wie ".", "uh", "mhm" einen Brain-Call ausloesen.
+    Prefixes ("hey", "ok", ...) are ignored and the phrase may repeat
+    ("Nova. Nova."), the way a person re-calls an assistant that seems not
+    to have heard. Matching folds accents and punctuation like the wake
+    detector's own matcher (``wake_constants``).
+    """
+    core = _phrase_core_for_match(wake_phrase or "")
+    if not core:
+        return False
+    tokens = [t for t in _normalize_phrase_for_match(text) if t not in _WAKE_PREFIXES]
+    if not tokens or len(tokens) % len(core):
+        return False
+    return all(
+        tokens[i : i + len(core)] == core for i in range(0, len(tokens), len(core))
+    )
+
+
+def _is_wake_only(text: str, wake_phrase: str | None = None) -> bool:
+    """True when the utterance is only a wake word (no command).
+
+    Covers the built-in "Jarvis" forms and, when given, the configured custom
+    ``wake_phrase`` — without it a user whose wake word is "Nova" sent a bare
+    "Nova." to the brain as if it were a request.
+
+    Second condition: fewer than 3 meaningful characters (anything except
+    whitespace/punctuation), so very short noise transcripts such as ".",
+    "uh", "mhm" never trigger a brain call either.
     """
     if WAKE_ONLY_RE.match(text):
+        return True
+    if _is_custom_wake_only(text, wake_phrase):
         return True
     meaningful = re.sub(r"[^\wäöüÄÖÜß]+", "", text)
     return len(meaningful) < 3
@@ -15964,7 +15998,7 @@ class SpeechPipeline:
         # den bereits abgespielten ACK. Rueckkehr zu LISTENING, User kann den
         # eigentlichen Command nachreichen.
         pending_hangup = getattr(self, "_hangup_confirmation", None)
-        if _is_wake_only(text) and not (
+        if _is_wake_only(text, getattr(self._wake_plan, "phrase", None)) and not (
             pending_hangup is not None and pending_hangup.pending_turn is not None
         ):
             log.info("🤫 Wake-only-Turn (%r) — skip Brain, weiter zuhören.", text)
